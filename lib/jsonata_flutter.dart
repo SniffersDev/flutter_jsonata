@@ -1,4 +1,3 @@
 library;
 
-export 'src/jsonata_mobile.dart';
-export 'src/jsonata_result.dart';
+export 'src/jsonata_mobile.dart' if (dart.library.html) 'src/jsonata_web.dart';

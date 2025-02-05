@@ -1,74 +1,68 @@
 import 'dart:async';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:js' as js;
+import 'dart:convert';
+import 'dart:js_interop';
 
-// Import your JSONata code, error, and result classes
 import 'jsonata_core.dart';
 import 'jsonata_result.dart';
+
+@JS('jsonata')
+external _JsonataExpression _jsonata(String expression);
+
+@JS()
+@staticInterop
+class _JsonataExpression {
+  external factory _JsonataExpression();
+}
+
+extension _JsonataExpressionExt on _JsonataExpression {
+  external JSPromise<JSAny> evaluate(JSAny input);
+}
+
+@JS('eval')
+external String? _jsEval(String code);
+
+/// Bind to JS's `JSON.parse` function, which returns a JS object/array.
+@JS('JSON.parse')
+external JSAny? jsJsonParse(String jsonString);
 
 class Jsonata {
   bool _isReady = false;
   String? _data;
 
-  /// If you need to pass custom functions, you can do so here,
-  /// but each 'fn' must be JavaScript code (as a string) in this approach.
-  Jsonata({
-    String? data,
-    Map<String, dynamic>? functions,
-  }) {
+  Jsonata({String? data, Map<String, dynamic>? functions}) {
     _data = data;
     if (functions != null) {
       _addFunctions(functions);
     }
   }
 
-  /// Initialize the JSONata engine by evaluating the jsonAtaJS source.
   Future<void> _initialize() async {
     if (_isReady) return;
-
     try {
-      // Evaluate the entire JSONata script in the JS context.
-      js.context.callMethod('eval', [jsonAtaJS]);
+      _jsEval(jsonAtaJS);
       _isReady = true;
     } catch (e) {
       throw JsonataError('Initialization failed', e);
     }
   }
 
-  /// (Optional) Register additional JS functions into JSONata.
-  /// NOTE: This only works if `fn` is a valid JavaScript function as a string.
   void _addFunctions(Map<String, dynamic> functions) {
-    functions.forEach((name, fn) {
-      // E.g. fn might be "function(x) { return x + 1; }"
-      final code = '''
-        jsonata.registerFunction("$name", $fn);
-      ''';
-      js.context.callMethod('eval', [code]);
+    functions.forEach((name, fnSource) {
+      final code = 'jsonata.registerFunction("$name", $fnSource);';
+      _jsEval(code);
     });
   }
 
-  /// Identical to your original _cleanExpression method
-  /// to handle newline, spacing, and single-quote replacements.
   String _cleanExpression(String expression) {
-    final cleanExp = expression
+    return expression
         .split('\n')
         .map((line) => line.trim())
         .where((line) => line.isNotEmpty)
         .join(' ')
         .replaceAll("'", '"');
-
-    return cleanExp;
   }
 
-  /// Main evaluate method:
-  /// 1. Ensures JSONata is initialized.
-  /// 2. Creates an async JS function that calls jsonata(...).evaluate(...).
-  /// 3. Converts the returned Promise to a Dart Future via promiseToFuture.
-  Future<JsonataResult> evaluate({
-    required String expression,
-    String? data,
-  }) async {
-    // Make sure we've loaded the JS code
+  Future<JsonataResult> evaluate({required String expression, String? data}) async {
     await _initialize();
 
     final sourceData = data ?? _data;
@@ -78,62 +72,40 @@ class Jsonata {
 
     try {
       final cleanExpression = _cleanExpression(expression);
-
-      // This JS snippet is an async IIFE that returns a promise
-      final code = '''
-                (function() {
-                  return new Promise(async (resolve, reject) => {
-                    try {
-                      var data = $sourceData;
-                      var expr = jsonata('$cleanExpression');
-                      var result = await expr.evaluate(data);
-                      resolve(result === undefined ? null : result);
-                    } catch (err) {
-                      reject({
-                        message: err.message,
-                        code: err.code,
-                        position: err.position,
-                        token: err.token
-                      });
-                    }
-                  });
-                })()
-              ''';
-
-      // Create a Completer to handle the async result
-      final Completer<JsonataResult> completer = Completer<JsonataResult>();
-
-      // Evaluate the JavaScript code
-      final promise = js.context.callMethod('eval', [code]);
-
-      if (promise != null && promise is js.JsObject) {
-        promise.callMethod('then', [
-          (result) {
-            completer.complete(JsonataResult.success(result));
-          },
-          (error) {
-            completer.complete(JsonataResult.error(JsonataError(error.toString())));
-          }
-        ]);
+      final parsedData = tryParseJsonToJsObject(sourceData);
+      final exprObj = _jsonata(cleanExpression);
+      if (parsedData != null) {
+        final future = exprObj.evaluate(parsedData).toDart;
+        final result = await future;
+        return JsonataResult.success(result);
       } else {
-        completer.complete(JsonataResult.error(JsonataError('Invalid JavaScript execution result')));
+        return JsonataResult.error(JsonataError('Failed to pars the data'));
       }
-
-      return completer.future;
     } catch (e) {
-      // If the JS threw an error, or anything else went wrong
-      return Future.value(JsonataResult.error(JsonataError(e.toString())));
+      return JsonataResult.error(JsonataError('Evaluation failed: $e', e));
     }
   }
 
-  /// Validate an expression by evaluating it against empty data.
   Future<bool> validateExpression(String expression) async {
     final result = await evaluate(expression: expression, data: '{}');
     return result.isSuccess;
   }
 
-  /// For parity with the original code; not really needed in Web.
-  void dispose() {
-    // No-op on Web. If you want to do anything else, do it here.
+  void dispose() {}
+
+  /// Tries to parse [raw] as JSON in Dart.
+  /// If valid, returns the JS object/array via `JSON.parse`.
+  /// If invalid, returns the original string.
+  ///
+  /// Note: We avoid `dynamic` by using `Object?`.
+  JSAny? tryParseJsonToJsObject(String raw) {
+    // `json.decode` returns `dynamic`, but we cast to `Object` to avoid `dynamic`.
+    final Object decoded = json.decode(raw) as Object;
+
+    // Re-encode so that we can pass a proper JSON string to the JS parse.
+    final String reencoded = json.encode(decoded);
+
+    // Returns a real JS object or array.
+    return jsJsonParse(reencoded);
   }
 }

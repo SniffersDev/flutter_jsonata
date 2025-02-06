@@ -99,13 +99,8 @@ class Jsonata {
   ///
   /// Note: We avoid `dynamic` by using `Object?`.
   JSAny? tryParseJsonToJsObject(String raw) {
-    // `json.decode` returns `dynamic`, but we cast to `Object` to avoid `dynamic`.
     final Object decoded = json.decode(raw) as Object;
-
-    // Re-encode so that we can pass a proper JSON string to the JS parse.
     final String reencoded = json.encode(decoded);
-
-    // Returns a real JS object or array.
     return jsJsonParse(reencoded);
   }
 }

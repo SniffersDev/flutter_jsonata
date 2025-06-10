@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:flutter_js_stable/flutter_js_stable.dart';
+import 'package:flutter_js/flutter_js.dart';
 import 'jsonata_core.dart';
 import 'jsonata_result.dart';
 
@@ -12,7 +12,7 @@ class Jsonata {
     String? data,
     Map<String, dynamic>? functions,
   }) {
-    _js = getJavascriptRuntime(forceJavascriptCoreOnAndroid: true);
+    _js = getJavascriptRuntime(forceJavascriptCoreOnAndroid: false);
     _data = data;
 
     if (functions != null) {

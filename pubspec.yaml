@@ -1,6 +1,6 @@
 name: jsonata_flutter
 description: A Flutter implementation of JSONata query and transformation language
-version: 1.0.2
+version: 1.0.7
 homepage: https://github.com/hakanmertb/jsonata_flutter
 
 environment:
